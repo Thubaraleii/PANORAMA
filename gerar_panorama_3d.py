@@ -25,6 +25,7 @@ import gerar_visualizador_3d as v  # noqa: E402  (paleta e constantes da marca)
 
 BANCO = MESTRADO / "2_Banco_de_Dados"
 LINEAMENTOS_GPKG = BANCO / "Unificação" / "lineamentos_direcoes.gpkg"
+GEOLOGIA_REGIONAL_GPKG = BANCO / "dados_base" / "geologia_regional_sc.gpkg"
 POCOS_GPKG = BANCO / "Unificação" / "pocos_regionais.gpkg"
 LOGO_PATH = AQUI / "assets" / "logo_taio.png"
 CACHE = AQUI / "cache"
@@ -109,10 +110,30 @@ def main():
     # satelite so na terra; no mar usa as cores da batimetria (a imagem Esri no mar e uniforme)
     cor_sat = np.where((gz.ravel() >= 0)[:, None], cor_sat, cores_hipsometricas(gz).reshape(-1, 3))
 
+    # textura geologica regional (CPRM SC 1:500.000): poligonos rasterizados em 400 m e amostrados nos vertices
+    from rasterio import features
+    from rasterio.transform import from_bounds
+    geo = gpd.read_file(GEOLOGIA_REGIONAL_GPKG, layer="litologia")
+    res = 400.0
+    w_r, h_r = int((x1 - x0) / res), int((y1 - y0) / res)
+    shapes = [(g, k + 1) for k, g in enumerate(geo.geometry)]
+    raster = features.rasterize(shapes, out_shape=(h_r, w_r), transform=from_bounds(x0, y0, x1, y1, w_r, h_r), fill=0, dtype="uint16")
+    col = np.clip(((gx - x0) / (x1 - x0) * (w_r - 1)).astype(int), 0, w_r - 1)
+    row = np.clip(((y1 - gy) / (y1 - y0) * (h_r - 1)).astype(int), 0, h_r - 1)
+    idx_geo = raster[row, col]
+    paleta_geo = np.array([[0, 0, 0]] + [hex_rgb(c) for c in geo["cor"]], dtype=float)
+    cor_geo = paleta_geo[idx_geo].reshape(-1, 3)
+    sem_poligono = (idx_geo == 0).ravel()
+    cor_geo[sem_poligono] = cor_hip[sem_poligono]
+    # no mar mantem as cores da batimetria
+    mar = (gz.ravel() < 0)
+    cor_geo[mar] = cor_hip[mar]
+    cor_geo = cor_geo.astype(np.uint8)
+
     ti, tj, tk = triangulos_grade(ny, nx)
     base = dict(x=np.round(gx.ravel(), 0), y=np.round(gy.ravel(), 0), z=gz.ravel(), i=ti, j=tj, k=tk)
     fig = go.Figure()
-    for nome, cores, vis in (("tex_satelite", cor_sat, True), ("tex_hipsometria", cor_hip, False)):
+    for nome, cores, vis in (("tex_satelite", cor_sat, True), ("tex_geologia", cor_geo, False), ("tex_hipsometria", cor_hip, False)):
         fig.add_trace(go.Mesh3d(**base, vertexcolor=cores, name=nome, visible=vis, showlegend=False, hoverinfo="skip", meta=nome,
                                 lighting=dict(ambient=0.85, diffuse=0.45, specular=0.02)))
 
@@ -142,6 +163,30 @@ def main():
             fig.add_trace(go.Scatter3d(x=xs, y=ys, z=z_em(np.nan_to_num(xs), np.nan_to_num(ys), ELEV_LINHA), mode="lines",
                                        line=dict(color=cor, width=4), name=f"Lineamento {tipo.lower()}", legendgroup="lin",
                                        meta="lineamentos", hoverinfo="name"))
+    # estruturas (falhas/fraturas) e diques da CPRM (SIG SC)
+    est = gpd.read_file(GEOLOGIA_REGIONAL_GPKG, layer="estrutura")
+    for categoria, cor, larg in (("Falha", "#FF493D", 4), ("Fratura", "#9FB3C8", 2)):
+        xs, ys = [], []
+        for g in est.loc[est["categoria"] == categoria, "geometry"]:
+            for seg in ([g] if g.geom_type == "LineString" else list(getattr(g, "geoms", []))):
+                if seg.geom_type != "LineString" or seg.length < 1500:
+                    continue
+                pts = [(seg.interpolate(d).x, seg.interpolate(d).y) for d in np.linspace(0, seg.length, max(int(seg.length // 1500), 2))]
+                xs += [q[0] for q in pts] + [np.nan]; ys += [q[1] for q in pts] + [np.nan]
+        if xs:
+            fig.add_trace(go.Scatter3d(x=xs, y=ys, z=z_em(np.nan_to_num(xs), np.nan_to_num(ys), ELEV_LINHA + 20), mode="lines",
+                                       line=dict(color=cor, width=larg), name=f"{categoria} (CPRM)", legendgroup="cprm",
+                                       meta="cprm", hoverinfo="name"))
+    dq = gpd.read_file(GEOLOGIA_REGIONAL_GPKG, layer="dique")
+    xs, ys = [], []
+    for g in dq.geometry:
+        for seg in ([g] if g.geom_type == "LineString" else list(getattr(g, "geoms", []))):
+            if seg.geom_type != "LineString":
+                continue
+            pts = [(seg.interpolate(d).x, seg.interpolate(d).y) for d in np.linspace(0, seg.length, max(int(seg.length // 1500), 2))]
+            xs += [q[0] for q in pts] + [np.nan]; ys += [q[1] for q in pts] + [np.nan]
+    fig.add_trace(go.Scatter3d(x=xs, y=ys, z=z_em(np.nan_to_num(xs), np.nan_to_num(ys), ELEV_LINHA + 40), mode="lines",
+                               line=dict(color=v.COR_DIQUE, width=6), name="Diques (CPRM)", legendgroup="cprm", meta="cprm", hoverinfo="name"))
     # corpos intrusivos (contornos) e area de estudo
     lito = gpd.read_file(v.LITOLOGIA_ATUALIZADA).to_crs(CRS_UTM)
     for nome, cor in (("Soleira", v.COR_SILL), ("Dique", v.COR_DIQUE)):
@@ -212,16 +257,16 @@ def main():
 </style></head><body>
 <img id="logo" src="data:image/png;base64,{logo}">
 <div id="barra"><h1><b>Panorama 3D</b> — norte de SC</h1>
- <div class="grupo"><label>Textura</label><button class="tex ativo" data-t="tex_satelite">Satélite</button><button class="tex" data-t="tex_hipsometria">Hipsometria + batimetria</button></div>
+ <div class="grupo"><label>Textura</label><button class="tex ativo" data-t="tex_satelite">Satélite</button><button class="tex" data-t="tex_geologia">Geologia SC (CPRM)</button><button class="tex" data-t="tex_hipsometria">Hipsometria + batimetria</button></div>
  <div class="grupo"><label>Exagero vertical</label><select id="exag"><option value="1">1×</option><option value="3">3×</option><option value="5">5×</option><option value="8" selected>8×</option><option value="12">12×</option><option value="20">20×</option></select></div>
- <div class="grupo"><label>Camadas</label><button class="cam ativo" data-m="lineamentos">Lineamentos</button><button class="cam ativo" data-m="corpos">Corpos / Taió</button><button class="cam ativo" data-m="pocos">Poços</button></div>
+ <div class="grupo"><label>Camadas</label><button class="cam ativo" data-m="lineamentos">Lineamentos</button><button class="cam ativo" data-m="cprm">Estruturas CPRM</button><button class="cam ativo" data-m="corpos">Corpos / Taió</button><button class="cam ativo" data-m="pocos">Poços</button></div>
  <div class="grupo"><label>Vista</label><button class="cm" data-c="-0.5,-0.85,0.55">Oblíqua</button><button class="cm" data-c="0,-0.01,1.5">Planta</button><button class="cm" data-c="0,-1.3,0.2">Perfil O→L</button><button class="cm" data-c="-1.3,0,0.2">Perfil S→N</button></div>
  <div id="info">Relevo/batimetria: AWS Terrain Tiles · satélite: Esri · {len(pocos)} poços · área ≈ {dx / 1000:.0f} × {dy / 1000:.0f} km</div></div>
 <div id="plot"></div>
 <script>{get_plotlyjs()}</script>
 <script>
 var FIG = {fig_json}, AR = {{x: {ar['x']}, y: {ar['y']}, z: {ar['z']}}};
-var textura = 'tex_satelite', EXAG = {EXAGERO_PADRAO}, camadasOn = {{lineamentos: true, corpos: true, pocos: true}};
+var textura = 'tex_satelite', EXAG = {EXAGERO_PADRAO}, camadasOn = {{lineamentos: true, cprm: true, corpos: true, pocos: true}};
 var gd = document.getElementById('plot');
 function altura() {{ return window.innerHeight - document.getElementById('barra').offsetHeight; }}
 function aplicar() {{
