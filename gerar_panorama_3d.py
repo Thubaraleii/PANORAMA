@@ -221,6 +221,8 @@ def main():
     print(f"  {len(pocos)} poços dentro do panorama")
 
     # ---- direcoes dos lineamentos: segmentos (x1,y1,z1,x2,y2,z2,azimute) pra roseta e filtro por direcao (JS) ----
+    cont_fid = [0]
+
     def segmentos(geoms, passo, extra_z):
         out = []
         for g in geoms:
@@ -229,12 +231,13 @@ def main():
                 if seg.geom_type != "LineString" or seg.length < 100:
                     continue
                 n = max(int(seg.length // passo), 2)
+                cont_fid[0] += 1
                 pts = [(seg.interpolate(d).x, seg.interpolate(d).y) for d in np.linspace(0, seg.length, n)]
                 zs = z_em([q[0] for q in pts], [q[1] for q in pts], extra_z)
                 for k in range(len(pts) - 1):
                     az = float(np.degrees(np.arctan2(pts[k + 1][0] - pts[k][0], pts[k + 1][1] - pts[k][1])) % 180)
                     out.append([round(pts[k][0]), round(pts[k][1]), round(float(zs[k])), round(pts[k + 1][0]),
-                                round(pts[k + 1][1]), round(float(zs[k + 1])), round(az, 1)])
+                                round(pts[k + 1][1]), round(float(zs[k + 1])), round(az, 1), cont_fid[0]])
         return out
 
     ds = {
@@ -254,6 +257,8 @@ def main():
     # trace de contexto (o que fica fora da direcao selecionada)
     fig.add_trace(go.Scatter3d(x=[], y=[], z=[], mode="lines", line=dict(color="#8A94A6", width=1.5), opacity=0.3,
                                name="Fora da seleção", showlegend=False, hoverinfo="skip", meta="ctx"))
+    fig.add_trace(go.Scatter3d(x=[], y=[], z=[], mode="lines", line=dict(color="#FFFFFF", width=9),
+                               name="Selecionados (tela)", showlegend=False, hoverinfo="skip", meta="sel"))
 
     zmax = float(gz.max()) + 80
     fig.update_layout(
@@ -290,7 +295,11 @@ def main():
  #logo {{ position:fixed; top:8px; right:12px; width:46px; height:46px; border-radius:50%; border:2px solid var(--ac); z-index:5; }}
  #corpo {{ display:flex; }}
  #plot {{ flex:1; min-width:0; }}
- #lateral {{ width:340px; flex-shrink:0; background:var(--painel); border-left:2px solid var(--ac); padding:10px 12px; overflow-y:auto; font-size:12px; }}
+ #lateral {{ width:660px; flex-shrink:0; background:var(--painel); border-left:2px solid var(--ac); padding:10px 12px; overflow-y:auto; font-size:12px; }}
+ #roses {{ display:flex; gap:8px; }}
+ .rosa-bloco {{ flex:1; min-width:0; }}
+ .rosa-bloco h3 {{ font-size:12px; margin:6px 0 0 0; opacity:.85; }}
+ @media (max-width:1150px) {{ #lateral {{ width:340px; }} #roses {{ flex-direction:column; }} }}
  #lateral h2 {{ font-size:13px; margin:0 0 6px 0; text-transform:uppercase; letter-spacing:.05em; color:var(--ac); }}
  #lateral label.ds {{ display:flex; align-items:center; gap:6px; margin:2px 0; cursor:pointer; }}
  #lateral label.ds i {{ width:12px; height:4px; border-radius:2px; flex-shrink:0; }}
@@ -311,13 +320,24 @@ def main():
  <div id="info">Relevo/batimetria: AWS Terrain Tiles · satélite: Esri · {len(pocos)} poços · área ≈ {dx / 1000:.0f} × {dy / 1000:.0f} km</div></div>
 <div id="corpo"><div id="plot"></div>
 <aside id="lateral">
- <h2>Direções dos lineamentos</h2>
+ <h2>Direções dos lineamentos — comparar</h2>
  <div id="ds-lista"></div>
- <div id="roseta" style="width:100%;height:300px"></div>
- <div id="stats"></div>
- <div class="linha"><label>Azimute</label><input id="az0" type="number" min="0" max="180" value="0"> a <input id="az1" type="number" min="0" max="180" value="180"><button id="az-ap">Isolar faixa</button></div>
- <div class="linha"><button id="btn-pref">Direção preferencial</button><button id="btn-limpar">Limpar seleção</button></div>
- <p class="dica">Roseta por comprimento (km) em classes de 10°, simétrica (0–180°). Clique numa barra para isolar aquela direção no modelo 3D (várias barras = várias direções). Fora da seleção os lineamentos ficam em cinza.</p>
+ <div id="roses">
+  <div class="rosa-bloco">
+   <h3>① Conjuntos</h3>
+   <div id="roseta" style="width:100%;height:290px"></div>
+   <div id="stats"></div>
+  </div>
+  <div class="rosa-bloco">
+   <h3>② Seleção na tela</h3>
+   <div id="roseta2" style="width:100%;height:290px"></div>
+   <div id="stats2">Clique em lineamentos no modelo 3D para somá-los a esta roseta.</div>
+  </div>
+ </div>
+ <div class="linha"><label><input type="checkbox" id="escala-comum" checked> mesma escala radial nas duas</label></div>
+ <div class="linha"><label>Azimute</label><input id="az0" type="number" min="0" max="180" value="0"> a <input id="az1" type="number" min="0" max="180" value="180"><button id="az-ap">Isolar faixa (①)</button></div>
+ <div class="linha"><button id="btn-pref">Direção preferencial (①)</button><button id="btn-limpar">Limpar faixa</button><button id="btn-limpar2">Limpar seleção da tela (②)</button></div>
+ <p class="dica">① roseta por comprimento (km) em classes de 10°, para os conjuntos marcados; clique numa barra para isolar a direção no 3D. ② roseta só dos lineamentos que você clicar no modelo (cada clique liga/desliga um lineamento inteiro, realçado em branco). As duas ficam lado a lado para comparação.</p>
 </aside></div>
 <script>{get_plotlyjs()}</script>
 <script>
@@ -337,7 +357,7 @@ function aplicar() {{
   Plotly.relayout(gd, {{'scene.aspectratio': {{x: AR.x, y: AR.y, z: AR.z * EXAG}}}});
 }}
 gd.style.height = altura() + 'px'; document.getElementById('lateral').style.height = altura() + 'px';
-Plotly.newPlot(gd, FIG.data, FIG.layout, {{responsive: true, displaylogo: false}}).then(aplicar);
+Plotly.newPlot(gd, FIG.data, FIG.layout, {{responsive: true, displaylogo: false}}).then(function() {{ aplicar(); atualizar3d(); }});
 document.querySelectorAll('.tex').forEach(function(b) {{ b.onclick = function() {{ textura = b.dataset.t;
   document.querySelectorAll('.tex').forEach(function(x) {{ x.classList.toggle('ativo', x === b); }}); aplicar(); }}; }});
 document.querySelectorAll('.cam').forEach(function(b) {{ b.onclick = function() {{ camadasOn[b.dataset.m] = !camadasOn[b.dataset.m];
@@ -345,15 +365,16 @@ document.querySelectorAll('.cam').forEach(function(b) {{ b.onclick = function() 
 document.querySelectorAll('.cm').forEach(function(b) {{ b.onclick = function() {{ var c = b.dataset.c.split(',').map(parseFloat);
   Plotly.relayout(gd, {{'scene.camera.eye': {{x: c[0], y: c[1], z: c[2]}}, 'scene.camera.up': {{x: 0, y: 0, z: 1}}}}); }}; }});
 document.getElementById('exag').onchange = function() {{ EXAG = parseFloat(this.value); aplicar(); }};
-window.addEventListener('resize', function() {{ gd.style.height = altura() + 'px'; document.getElementById('lateral').style.height = altura() + 'px'; Plotly.Plots.resize(gd); Plotly.Plots.resize(document.getElementById('roseta')); }});
+window.addEventListener('resize', function() {{ gd.style.height = altura() + 'px'; document.getElementById('lateral').style.height = altura() + 'px'; Plotly.Plots.resize(gd); Plotly.Plots.resize(document.getElementById('roseta')); Plotly.Plots.resize(document.getElementById('roseta2')); }});
 
-// ---------------- rosetas de direcao dos lineamentos ----------------
-var NB = 18, rosa = document.getElementById('roseta');
+// ---------------- rosetas de direcao dos lineamentos (2 rosetas: conjuntos x selecao na tela) ----------------
+var NB = 18, rosa = document.getElementById('roseta'), rosa2 = document.getElementById('roseta2');
+var selTela = {{}}, idxMap = {{}}, FEAT = {{}};
 function binDe(az) {{ return Math.floor(az / 10) % NB; }}
 function nSel() {{ return Object.keys(bins).length; }}
 Object.keys(DS).forEach(function(k) {{
   var d = DS[k]; d.km = d.seg.map(function(s) {{ var dx = s[3] - s[0], dy = s[4] - s[1]; return Math.sqrt(dx * dx + dy * dy) / 1000; }});
-  d.bins = new Array(NB).fill(0); d.seg.forEach(function(s, i) {{ d.bins[binDe(s[6])] += d.km[i]; }});
+  d.bins = new Array(NB).fill(0); d.seg.forEach(function(s, i) {{ d.bins[binDe(s[6])] += d.km[i]; var f = s[7]; (FEAT[f] = FEAT[f] || {{k: k, idx: []}}).idx.push(i); }});
   d.total = d.km.reduce(function(a, b) {{ return a + b; }}, 0);
 }});
 function rotuloAz(az) {{ az = ((az % 180) + 180) % 180; return az <= 90 ? 'N' + az.toFixed(0) + '°E' : 'N' + (180 - az).toFixed(0) + '°O'; }}
@@ -365,66 +386,108 @@ function rotuloAz(az) {{ az = ((az % 180) + 180) % 180; return az <= 90 ? 'N' + 
   }}).join('');
   el.querySelectorAll('input').forEach(function(c) {{ c.onchange = function() {{ dsOn[c.dataset.k] = c.checked; aplicar(); atualizarDirecoes(); }}; }});
 }})();
-function desenharRoseta() {{
+// km por classe de 10 graus, por conjunto -- filtro(k, i, seg) decide se o segmento entra
+function binsPor(filtro) {{
+  var out = {{}};
+  Object.keys(DS).forEach(function(k) {{
+    var a = new Array(NB).fill(0);
+    DS[k].seg.forEach(function(s, i) {{ if (filtro(k, i, s)) a[binDe(s[6])] += DS[k].km[i]; }});
+    out[k] = a;
+  }});
+  return out;
+}}
+function filtroConjuntos(k, i, s) {{ return dsOn[k] && (!nSel() || bins[binDe(s[6])]); }}
+function filtroTela(k, i, s) {{ return !!selTela[s[7]]; }}
+function rmaxDe(b) {{
+  var m = 0; for (var q = 0; q < NB; q++) {{ var soma = 0; Object.keys(b).forEach(function(k) {{ soma += b[k][q]; }}); m = Math.max(m, soma); }} return m;
+}}
+function desenhar(div, bpor, destaque, rmax) {{
+  var cor = '{v.MARCA_CINZA_CLARO}';
   var tr = Object.keys(DS).filter(function(k) {{ return dsOn[k]; }}).map(function(k) {{
     var th = [], r = [], op = [];
-    for (var b = 0; b < NB; b++) {{ [b * 10 + 5, b * 10 + 185].forEach(function(a) {{ th.push(a); r.push(DS[k].bins[b]); op.push(nSel() === 0 || bins[b] ? 1 : 0.3); }}); }}
+    for (var b = 0; b < NB; b++) {{ [b * 10 + 5, b * 10 + 185].forEach(function(a) {{ th.push(a); r.push(bpor[k][b]); op.push(destaque(b) ? 1 : 0.3); }}); }}
     return {{type: 'barpolar', theta: th, r: r, width: 10, name: DS[k].nome, marker: {{color: DS[k].cor, opacity: op, line: {{color: '#071729', width: 0.5}}}},
             hovertemplate: '%{{theta}}°: %{{r:.1f}} km<extra>' + DS[k].nome + '</extra>'}};
   }});
-  var cor = '{v.MARCA_CINZA_CLARO}';
-  Plotly.react(rosa, tr, {{
-    paper_bgcolor: 'rgba(0,0,0,0)', font: {{color: cor, size: 11}}, margin: {{l: 36, r: 36, t: 10, b: 20}}, showlegend: false,
+  var rad = {{color: cor, gridcolor: '#2A4663', ticksuffix: ' km', angle: 45, tickangle: 45}};
+  if (rmax) rad.range = [0, rmax * 1.05];
+  Plotly.react(div, tr, {{
+    paper_bgcolor: 'rgba(0,0,0,0)', font: {{color: cor, size: 11}}, margin: {{l: 32, r: 32, t: 8, b: 16}}, showlegend: false,
     polar: {{bgcolor: 'rgba(0,0,0,0)', barmode: 'stack',
       angularaxis: {{rotation: 90, direction: 'clockwise', tickmode: 'array', tickvals: [0, 45, 90, 135, 180, 225, 270, 315],
                     ticktext: ['N', 'NE', 'L', 'SE', 'S', 'SO', 'O', 'NO'], color: cor, gridcolor: '#2A4663'}},
-      radialaxis: {{color: cor, gridcolor: '#2A4663', ticksuffix: ' km', angle: 45, tickangle: 45}}}},
+      radialaxis: rad}},
   }}, {{displayModeBar: false, responsive: true}});
 }}
-function estatisticas() {{
-  var sx = 0, sy = 0, tot = 0, n = 0, pico = new Array(NB).fill(0);
-  Object.keys(DS).forEach(function(k) {{
-    if (!dsOn[k]) return;
-    DS[k].seg.forEach(function(s, i) {{
-      var b = binDe(s[6]); pico[b] += DS[k].km[i];
-      if (nSel() && !bins[b]) return;
-      var a = s[6] * Math.PI / 90, L = DS[k].km[i]; sx += L * Math.cos(a); sy += L * Math.sin(a); tot += L; n++;
-    }});
-  }});
-  var med = ((Math.atan2(sy, sx) * 90 / Math.PI) + 180) % 180, R = tot ? Math.sqrt(sx * sx + sy * sy) / tot : 0;
-  var ip = pico.indexOf(Math.max.apply(null, pico));
-  document.getElementById('stats').innerHTML = tot
-    ? '<b>' + (nSel() ? 'Seleção' : 'Todos os lineamentos') + '</b>: ' + n + ' segmentos · ' + tot.toFixed(0) + ' km<br>' +
-      'Direção média: <b>' + rotuloAz(med) + '</b> (' + med.toFixed(0) + '°) · concentração R = ' + R.toFixed(2) + '<br>' +
-      'Classe dominante: <b>' + ip * 10 + '–' + (ip * 10 + 10) + '°</b> (' + rotuloAz(ip * 10 + 5) + ')'
-    : 'Nenhum lineamento na seleção.';
-  return ip;
+function resumo(bpor, rotulo, vazio) {{
+  var sx = 0, sy = 0, tot = 0, soma = new Array(NB).fill(0);
+  Object.keys(bpor).forEach(function(k) {{ if (!dsOn[k]) return; bpor[k].forEach(function(km, b) {{
+    var a = (b * 10 + 5) * Math.PI / 90; sx += km * Math.cos(a); sy += km * Math.sin(a); tot += km; soma[b] += km; }}); }});
+  var ip = soma.indexOf(Math.max.apply(null, soma));
+  if (!tot) return {{html: vazio, ip: ip}};
+  var med = ((Math.atan2(sy, sx) * 90 / Math.PI) + 180) % 180, R = Math.sqrt(sx * sx + sy * sy) / tot;
+  return {{ip: ip, html: '<b>' + rotulo + '</b>: ' + tot.toFixed(0) + ' km<br>Direção média: <b>' + rotuloAz(med) + '</b> (' + med.toFixed(0) + '°) · R = ' + R.toFixed(2) +
+    '<br>Classe dominante: <b>' + ip * 10 + '–' + (ip * 10 + 10) + '°</b> (' + rotuloAz(ip * 10 + 5) + ')'}};
+}}
+var ultimoClique = '';
+function atualizarRosetas() {{
+  var b1 = binsPor(filtroConjuntos), b2 = binsPor(filtroTela);
+  var comum = document.getElementById('escala-comum').checked, rmax = comum ? Math.max(rmaxDe(b1), rmaxDe(b2)) : 0;
+  desenhar(rosa, b1, function(b) {{ return nSel() === 0 || bins[b]; }}, rmax);
+  desenhar(rosa2, b2, function() {{ return true; }}, rmax);
+  var r1 = resumo(b1, nSel() ? 'Seleção de faixa' : 'Conjuntos marcados', 'Nenhum lineamento na seleção.');
+  document.getElementById('stats').innerHTML = r1.html;
+  var n2 = Object.keys(selTela).length;
+  var r2 = resumo(b2, n2 + ' lineamento(s) selecionado(s)', 'Clique em lineamentos no modelo 3D para somá-los a esta roseta.');
+  document.getElementById('stats2').innerHTML = r2.html + (n2 && ultimoClique ? '<br><span style="opacity:.7">' + ultimoClique + '</span>' : '');
+  return r1.ip;
 }}
 function atualizar3d() {{
   var sel = nSel() > 0, idx = [], X = [], Y = [], Z = [], cx = [], cy = [], cz = [];
   Object.keys(DS).forEach(function(k) {{
     var ti = FIG.data.findIndex(function(t) {{ return t.name === DS[k].traco; }});
     if (ti < 0) return;
-    var x = [], y = [], z = [];
-    if (dsOn[k]) DS[k].seg.forEach(function(s) {{
+    var x = [], y = [], z = [], mapa = [];
+    if (dsOn[k]) DS[k].seg.forEach(function(s, i) {{
       var dentro = !sel || bins[binDe(s[6])], A = dentro ? [x, y, z] : [cx, cy, cz];
       A[0].push(s[0], s[3], null); A[1].push(s[1], s[4], null); A[2].push(s[2], s[5], null);
+      if (dentro) mapa.push(i);
     }});
+    idxMap[k] = mapa;
     idx.push(ti); X.push(x); Y.push(y); Z.push(z);
   }});
-  var ci = FIG.data.findIndex(function(t) {{ return t.meta === 'ctx'; }});
-  idx.push(ci); X.push(cx); Y.push(cy); Z.push(cz);
+  idx.push(FIG.data.findIndex(function(t) {{ return t.meta === 'ctx'; }})); X.push(cx); Y.push(cy); Z.push(cz);
+  // lineamentos clicados (realce branco)
+  var sx = [], sy = [], sz = [];
+  Object.keys(selTela).forEach(function(f) {{ var ft = FEAT[f]; if (!ft || !dsOn[ft.k]) return; ft.idx.forEach(function(i) {{
+    var s = DS[ft.k].seg[i]; sx.push(s[0], s[3], null); sy.push(s[1], s[4], null); sz.push(s[2] + 8, s[5] + 8, null); }}); }});
+  idx.push(FIG.data.findIndex(function(t) {{ return t.meta === 'sel'; }})); X.push(sx); Y.push(sy); Z.push(sz);
   Plotly.restyle(gd, {{x: X, y: Y, z: Z}}, idx);
 }}
-function atualizarDirecoes() {{ desenharRoseta(); estatisticas(); atualizar3d(); }}
-desenharRoseta(); estatisticas();
+function atualizarDirecoes() {{ var ip = atualizarRosetas(); atualizar3d(); return ip; }}
+atualizarRosetas();
 rosa.on('plotly_click', function(ev) {{
   var b = binDe(ev.points[0].theta % 180);
   if (bins[b]) delete bins[b]; else bins[b] = true;
   atualizarDirecoes();
 }});
+gd.on('plotly_click', function(ev) {{
+  var pt = ev.points && ev.points[0];
+  if (!pt || !pt.data) return;
+  var k = NOME_DS[pt.data.name];
+  if (!k || !idxMap[k]) return;
+  var si = idxMap[k][Math.floor(pt.pointNumber / 3)];
+  if (si === undefined) return;
+  var s = DS[k].seg[si], f = s[7], ft = FEAT[f];
+  var kmTotal = ft.idx.reduce(function(a, i) {{ return a + DS[k].km[i]; }}, 0);
+  if (selTela[f]) {{ delete selTela[f]; ultimoClique = ''; }}
+  else {{ selTela[f] = true; ultimoClique = DS[k].nome + ' · ' + kmTotal.toFixed(1) + ' km · segmento ' + rotuloAz(s[6]) + ' (' + s[6].toFixed(0) + '°)'; }}
+  atualizarDirecoes();
+}});
+document.getElementById('escala-comum').onchange = atualizarRosetas;
 document.getElementById('btn-limpar').onclick = function() {{ bins = {{}}; atualizarDirecoes(); }};
-document.getElementById('btn-pref').onclick = function() {{ var ip = estatisticas(); bins = {{}}; bins[ip] = true; atualizarDirecoes(); }};
+document.getElementById('btn-limpar2').onclick = function() {{ selTela = {{}}; ultimoClique = ''; atualizarDirecoes(); }};
+document.getElementById('btn-pref').onclick = function() {{ var ip = atualizarRosetas(); bins = {{}}; bins[ip] = true; atualizarDirecoes(); }};
 document.getElementById('az-ap').onclick = function() {{
   var a0 = parseFloat(document.getElementById('az0').value), a1 = parseFloat(document.getElementById('az1').value);
   bins = {{}};
@@ -435,7 +498,7 @@ document.getElementById('az-ap').onclick = function() {{
 document.getElementById('btn-lateral').onclick = function() {{
   var l = document.getElementById('lateral'), vis = l.style.display !== 'none';
   l.style.display = vis ? 'none' : 'block'; this.classList.toggle('ativo', !vis);
-  Plotly.Plots.resize(gd); if (!vis) Plotly.Plots.resize(rosa);
+  Plotly.Plots.resize(gd); if (!vis) {{ Plotly.Plots.resize(rosa); Plotly.Plots.resize(rosa2); }}
 }};
 </script></body></html>"""
     OUT_HTML.write_text(html, encoding="utf-8")
