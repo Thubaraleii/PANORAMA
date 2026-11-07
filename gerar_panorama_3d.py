@@ -165,7 +165,7 @@ def main():
                                        meta="lineamentos", hoverinfo="name"))
     # estruturas (falhas/fraturas) e diques da CPRM (SIG SC)
     est = gpd.read_file(GEOLOGIA_REGIONAL_GPKG, layer="estrutura")
-    for categoria, cor, larg in (("Falha", "#FF493D", 4), ("Fratura", "#9FB3C8", 2)):
+    for categoria, cor, larg in (("Falha", "#2563EB", 4), ("Fratura", "#D81B73", 2)):
         xs, ys = [], []
         for g in est.loc[est["categoria"] == categoria, "geometry"]:
             for seg in ([g] if g.geom_type == "LineString" else list(getattr(g, "geoms", []))):
@@ -210,13 +210,13 @@ def main():
         px, py = pocos.geometry.x.values, pocos.geometry.y.values
         txt = [f"{n}<br>{p:.0f} m" if p == p else str(n) for n, p in zip(pocos["nome"], pocos["profundidade_m"])]
         fig.add_trace(go.Scatter3d(x=px, y=py, z=z_em(px, py, 60), mode="markers", marker=dict(size=5, symbol="diamond", color="#FFFFFF",
-                                   line=dict(width=1, color="#FF493D")), text=txt, hoverinfo="text", name="Poços (ANP/SAG)", meta="pocos"))
+                                   line=dict(width=1, color="#13BBE6")), text=txt, hoverinfo="text", name="Poços (ANP/SAG)", meta="pocos"))
         # hastes verticais mostrando a profundidade (exagero igual ao do relevo)
         hx, hy, hz = [], [], []
         for x, y, p in zip(px, py, pocos["profundidade_m"].fillna(0)):
             zt = float(z_em([x], [y], 0)[0])
             hx += [x, x, np.nan]; hy += [y, y, np.nan]; hz += [zt, zt - float(p), np.nan]
-        fig.add_trace(go.Scatter3d(x=hx, y=hy, z=hz, mode="lines", line=dict(color="#FF493D", width=4), showlegend=False,
+        fig.add_trace(go.Scatter3d(x=hx, y=hy, z=hz, mode="lines", line=dict(color="#13BBE6", width=4), showlegend=False,
                                    hoverinfo="skip", meta="pocos"))
     print(f"  {len(pocos)} poços dentro do panorama")
 
@@ -238,9 +238,9 @@ def main():
         return out
 
     ds = {
-        "falha": dict(nome="Falhas (CPRM)", cor="#FF493D", traco="Falha (CPRM)",
+        "falha": dict(nome="Falhas (CPRM)", cor="#2563EB", traco="Falha (CPRM)",
                       seg=segmentos(est.loc[est["categoria"] == "Falha", "geometry"], 1000, ELEV_LINHA + 20)),
-        "fratura": dict(nome="Fraturas (CPRM)", cor="#9FB3C8", traco="Fratura (CPRM)",
+        "fratura": dict(nome="Fraturas (CPRM)", cor="#D81B73", traco="Fratura (CPRM)",
                         seg=segmentos(est.loc[est["categoria"] == "Fratura", "geometry"], 1000, ELEV_LINHA + 20)),
         "dique": dict(nome="Diques (CPRM)", cor=v.COR_DIQUE, traco="Diques (CPRM)", seg=segmentos(dq.geometry, 1000, ELEV_LINHA + 40)),
         "loc_pos": dict(nome="Lineamentos locais (+)", cor=COR_LINEAMENTO["Positivo"], traco="Lineamento positivo",
