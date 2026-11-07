@@ -258,7 +258,9 @@ def main():
     fig.add_trace(go.Scatter3d(x=[], y=[], z=[], mode="lines", line=dict(color="#8A94A6", width=1.5), opacity=0.3,
                                name="Fora da seleção", showlegend=False, hoverinfo="skip", meta="ctx"))
     fig.add_trace(go.Scatter3d(x=[], y=[], z=[], mode="lines", line=dict(color="#FFFFFF", width=9),
-                               name="Selecionados (tela)", showlegend=False, hoverinfo="skip", meta="sel"))
+                               name="Direção selecionada (roseta 1)", showlegend=False, hoverinfo="skip", meta="selA"))
+    fig.add_trace(go.Scatter3d(x=[], y=[], z=[], mode="lines", line=dict(color="#FFD54A", width=9),
+                               name="Direção selecionada (roseta 2)", showlegend=False, hoverinfo="skip", meta="selB"))
 
     zmax = float(gz.max()) + 80
     fig.update_layout(
@@ -306,8 +308,10 @@ def main():
  #lateral label.ds span {{ margin-left:auto; opacity:.65; }}
  #lateral .linha {{ display:flex; gap:6px; align-items:center; margin:6px 0; flex-wrap:wrap; }}
  #lateral input[type=number] {{ width:56px; background:var(--bg); color:var(--txt); border:1px solid var(--ac); border-radius:4px; padding:3px; }}
- #stats {{ background:var(--bg); border-radius:6px; padding:8px; line-height:1.6; margin-top:4px; }}
- #stats b {{ color:var(--ac); }}
+ .stats {{ background:var(--bg); border-radius:6px; padding:8px; line-height:1.6; margin-top:4px; min-height:70px; }}
+ .stats b {{ color:var(--ac); }}
+ .chip {{ display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:4px; }}
+ .ds-lista {{ margin-bottom:2px; }}
  #lateral .dica {{ opacity:.65; font-size:11px; line-height:1.45; }}
 </style></head><body>
 <img id="logo" src="data:image/png;base64,{logo}">
@@ -321,23 +325,24 @@ def main():
 <div id="corpo"><div id="plot"></div>
 <aside id="lateral">
  <h2>Direções dos lineamentos — comparar</h2>
- <div id="ds-lista"></div>
  <div id="roses">
   <div class="rosa-bloco">
-   <h3>① Conjuntos</h3>
-   <div id="roseta" style="width:100%;height:290px"></div>
-   <div id="stats"></div>
+   <h3><i class="chip" style="background:#FFFFFF"></i> Roseta 1</h3>
+   <div class="ds-lista" id="ds-A"></div>
+   <div id="roseta" style="width:100%;height:280px"></div>
+   <div class="stats" id="stats"></div>
+   <div class="linha"><button id="pref-A">Direção preferencial</button><button id="sub-A">Direção subordinada</button><button id="lim-A">Limpar</button></div>
   </div>
   <div class="rosa-bloco">
-   <h3>② Seleção na tela</h3>
-   <div id="roseta2" style="width:100%;height:290px"></div>
-   <div id="stats2">Clique em lineamentos no modelo 3D para somá-los a esta roseta.</div>
+   <h3><i class="chip" style="background:#FFD54A"></i> Roseta 2</h3>
+   <div class="ds-lista" id="ds-B"></div>
+   <div id="roseta2" style="width:100%;height:280px"></div>
+   <div class="stats" id="stats2"></div>
+   <div class="linha"><button id="pref-B">Direção preferencial</button><button id="sub-B">Direção subordinada</button><button id="lim-B">Limpar</button></div>
   </div>
  </div>
  <div class="linha"><label><input type="checkbox" id="escala-comum" checked> mesma escala radial nas duas</label></div>
- <div class="linha"><label>Azimute</label><input id="az0" type="number" min="0" max="180" value="0"> a <input id="az1" type="number" min="0" max="180" value="180"><button id="az-ap">Isolar faixa (①)</button></div>
- <div class="linha"><button id="btn-pref">Direção preferencial (①)</button><button id="btn-limpar">Limpar faixa</button><button id="btn-limpar2">Limpar seleção da tela (②)</button></div>
- <p class="dica">① roseta por comprimento (km) em classes de 10°, para os conjuntos marcados; clique numa barra para isolar a direção no 3D. ② roseta só dos lineamentos que você clicar no modelo (cada clique liga/desliga um lineamento inteiro, realçado em branco). As duas ficam lado a lado para comparação.</p>
+ <p class="dica">Cada roseta tem seus próprios conjuntos (marque o que quer comparar) e sua própria seleção. Roseta por comprimento (km) em classes de 10°, simétrica (0–180°). <b>Preferencial</b> = classe de maior comprimento (±10°); <b>subordinada</b> = a maior classe a pelo menos 30° da preferencial. A seleção da roseta 1 aparece em <b>branco</b> no 3D e a da roseta 2 em <b>amarelo</b>; o restante dos conjuntos marcados fica em cinza.</p>
 </aside></div>
 <script>{get_plotlyjs()}</script>
 <script>
@@ -367,51 +372,63 @@ document.querySelectorAll('.cm').forEach(function(b) {{ b.onclick = function() {
 document.getElementById('exag').onchange = function() {{ EXAG = parseFloat(this.value); aplicar(); }};
 window.addEventListener('resize', function() {{ gd.style.height = altura() + 'px'; document.getElementById('lateral').style.height = altura() + 'px'; Plotly.Plots.resize(gd); Plotly.Plots.resize(document.getElementById('roseta')); Plotly.Plots.resize(document.getElementById('roseta2')); }});
 
-// ---------------- rosetas de direcao dos lineamentos (2 rosetas: conjuntos x selecao na tela) ----------------
-var NB = 18, rosa = document.getElementById('roseta'), rosa2 = document.getElementById('roseta2');
-var selTela = {{}}, idxMap = {{}}, FEAT = {{}};
+// ---------------- rosetas de direcao dos lineamentos (2 rosetas iguais, cada uma com seus conjuntos e sua selecao) ----------------
+var NB = 18;
+var ROSAS = [
+  {{id: 'A', div: document.getElementById('roseta'), stats: 'stats', lista: 'ds-A', on: {{falha: true, fratura: true, dique: true, loc_pos: true, loc_neg: true}}, bins: {{}}, trace: 'selA'}},
+  {{id: 'B', div: document.getElementById('roseta2'), stats: 'stats2', lista: 'ds-B', on: {{falha: true, fratura: true, dique: true, loc_pos: true, loc_neg: true}}, bins: {{}}, trace: 'selB'}},
+];
 function binDe(az) {{ return Math.floor(az / 10) % NB; }}
-function nSel() {{ return Object.keys(bins).length; }}
+function nSel(r) {{ return Object.keys(r.bins).length; }}
 Object.keys(DS).forEach(function(k) {{
   var d = DS[k]; d.km = d.seg.map(function(s) {{ var dx = s[3] - s[0], dy = s[4] - s[1]; return Math.sqrt(dx * dx + dy * dy) / 1000; }});
-  d.bins = new Array(NB).fill(0); d.seg.forEach(function(s, i) {{ d.bins[binDe(s[6])] += d.km[i]; var f = s[7]; (FEAT[f] = FEAT[f] || {{k: k, idx: []}}).idx.push(i); }});
+  d.bins = new Array(NB).fill(0); d.seg.forEach(function(s, i) {{ d.bins[binDe(s[6])] += d.km[i]; }});
   d.total = d.km.reduce(function(a, b) {{ return a + b; }}, 0);
 }});
 function rotuloAz(az) {{ az = ((az % 180) + 180) % 180; return az <= 90 ? 'N' + az.toFixed(0) + '°E' : 'N' + (180 - az).toFixed(0) + '°O'; }}
-(function listaDs() {{
-  var el = document.getElementById('ds-lista');
+function uniao() {{ Object.keys(DS).forEach(function(k) {{ dsOn[k] = ROSAS[0].on[k] || ROSAS[1].on[k]; }}); }}
+ROSAS.forEach(function(r) {{
+  var el = document.getElementById(r.lista);
   el.innerHTML = Object.keys(DS).map(function(k) {{
     return '<label class="ds"><input type="checkbox" data-k="' + k + '" checked><i style="background:' + DS[k].cor + '"></i>' + DS[k].nome +
            '<span>' + DS[k].total.toFixed(0) + ' km</span></label>';
   }}).join('');
-  el.querySelectorAll('input').forEach(function(c) {{ c.onchange = function() {{ dsOn[c.dataset.k] = c.checked; aplicar(); atualizarDirecoes(); }}; }});
-}})();
-// km por classe de 10 graus, por conjunto -- filtro(k, i, seg) decide se o segmento entra
-function binsPor(filtro) {{
+  el.querySelectorAll('input').forEach(function(c) {{ c.onchange = function() {{ r.on[c.dataset.k] = c.checked; r.bins = {{}}; uniao(); aplicar(); atualizarDirecoes(); }}; }});
+}});
+function somaBins(r) {{
+  var soma = new Array(NB).fill(0);
+  Object.keys(DS).forEach(function(k) {{ if (r.on[k]) DS[k].bins.forEach(function(km, b) {{ soma[b] += km; }}); }});
+  return soma;
+}}
+function distBin(a, b) {{ var d = Math.abs(a - b) % NB; return Math.min(d, NB - d); }}
+function janela(ip) {{ var o = {{}}; [ip - 1, ip, ip + 1].forEach(function(b) {{ o[(b + NB) % NB] = true; }}); return o; }}
+function selecionarPref(r) {{
+  var s = somaBins(r), ip = s.indexOf(Math.max.apply(null, s)); if (s[ip] > 0) r.bins = janela(ip);
+}}
+function selecionarSub(r) {{
+  var s = somaBins(r), ip = s.indexOf(Math.max.apply(null, s)), melhor = -1, mv = 0;
+  for (var b = 0; b < NB; b++) if (distBin(b, ip) >= 3 && s[b] > mv) {{ mv = s[b]; melhor = b; }}
+  if (melhor >= 0) r.bins = janela(melhor);
+}}
+function binsPorConjunto(r) {{
   var out = {{}};
-  Object.keys(DS).forEach(function(k) {{
-    var a = new Array(NB).fill(0);
-    DS[k].seg.forEach(function(s, i) {{ if (filtro(k, i, s)) a[binDe(s[6])] += DS[k].km[i]; }});
-    out[k] = a;
-  }});
+  Object.keys(DS).forEach(function(k) {{ out[k] = DS[k].bins; }});
   return out;
 }}
-function filtroConjuntos(k, i, s) {{ return dsOn[k] && (!nSel() || bins[binDe(s[6])]); }}
-function filtroTela(k, i, s) {{ return !!selTela[s[7]]; }}
-function rmaxDe(b) {{
-  var m = 0; for (var q = 0; q < NB; q++) {{ var soma = 0; Object.keys(b).forEach(function(k) {{ soma += b[k][q]; }}); m = Math.max(m, soma); }} return m;
+function rmaxDe(r) {{
+  var s = somaBins(r); return Math.max.apply(null, s.concat([0]));
 }}
-function desenhar(div, bpor, destaque, rmax) {{
-  var cor = '{v.MARCA_CINZA_CLARO}';
-  var tr = Object.keys(DS).filter(function(k) {{ return dsOn[k]; }}).map(function(k) {{
-    var th = [], r = [], op = [];
-    for (var b = 0; b < NB; b++) {{ [b * 10 + 5, b * 10 + 185].forEach(function(a) {{ th.push(a); r.push(bpor[k][b]); op.push(destaque(b) ? 1 : 0.3); }}); }}
-    return {{type: 'barpolar', theta: th, r: r, width: 10, name: DS[k].nome, marker: {{color: DS[k].cor, opacity: op, line: {{color: '#071729', width: 0.5}}}},
+function desenhar(r, rmax) {{
+  var cor = '{v.MARCA_CINZA_CLARO}', sel = nSel(r) > 0;
+  var tr = Object.keys(DS).filter(function(k) {{ return r.on[k]; }}).map(function(k) {{
+    var th = [], rr = [], op = [];
+    for (var b = 0; b < NB; b++) {{ [b * 10 + 5, b * 10 + 185].forEach(function(a) {{ th.push(a); rr.push(DS[k].bins[b]); op.push(!sel || r.bins[b] ? 1 : 0.3); }}); }}
+    return {{type: 'barpolar', theta: th, r: rr, width: 10, name: DS[k].nome, marker: {{color: DS[k].cor, opacity: op, line: {{color: '#071729', width: 0.5}}}},
             hovertemplate: '%{{theta}}°: %{{r:.1f}} km<extra>' + DS[k].nome + '</extra>'}};
   }});
   var rad = {{color: cor, gridcolor: '#2A4663', ticksuffix: ' km', angle: 45, tickangle: 45}};
   if (rmax) rad.range = [0, rmax * 1.05];
-  Plotly.react(div, tr, {{
+  Plotly.react(r.div, tr, {{
     paper_bgcolor: 'rgba(0,0,0,0)', font: {{color: cor, size: 11}}, margin: {{l: 32, r: 32, t: 8, b: 16}}, showlegend: false,
     polar: {{bgcolor: 'rgba(0,0,0,0)', barmode: 'stack',
       angularaxis: {{rotation: 90, direction: 'clockwise', tickmode: 'array', tickvals: [0, 45, 90, 135, 180, 225, 270, 315],
@@ -419,86 +436,56 @@ function desenhar(div, bpor, destaque, rmax) {{
       radialaxis: rad}},
   }}, {{displayModeBar: false, responsive: true}});
 }}
-function resumo(bpor, rotulo, vazio) {{
-  var sx = 0, sy = 0, tot = 0, soma = new Array(NB).fill(0);
-  Object.keys(bpor).forEach(function(k) {{ if (!dsOn[k]) return; bpor[k].forEach(function(km, b) {{
-    var a = (b * 10 + 5) * Math.PI / 90; sx += km * Math.cos(a); sy += km * Math.sin(a); tot += km; soma[b] += km; }}); }});
+function resumo(r) {{
+  var sx = 0, sy = 0, tot = 0, sel = nSel(r) > 0, soma = somaBins(r);
+  soma.forEach(function(km, b) {{ if (sel && !r.bins[b]) return; var a = (b * 10 + 5) * Math.PI / 90; sx += km * Math.cos(a); sy += km * Math.sin(a); tot += km; }});
   var ip = soma.indexOf(Math.max.apply(null, soma));
-  if (!tot) return {{html: vazio, ip: ip}};
+  if (!tot) return 'Nenhum conjunto marcado.';
   var med = ((Math.atan2(sy, sx) * 90 / Math.PI) + 180) % 180, R = Math.sqrt(sx * sx + sy * sy) / tot;
-  return {{ip: ip, html: '<b>' + rotulo + '</b>: ' + tot.toFixed(0) + ' km<br>Direção média: <b>' + rotuloAz(med) + '</b> (' + med.toFixed(0) + '°) · R = ' + R.toFixed(2) +
-    '<br>Classe dominante: <b>' + ip * 10 + '–' + (ip * 10 + 10) + '°</b> (' + rotuloAz(ip * 10 + 5) + ')'}};
+  var total = soma.reduce(function(a, b) {{ return a + b; }}, 0);
+  return '<b>' + (sel ? 'Seleção' : 'Conjuntos marcados') + '</b>: ' + tot.toFixed(0) + ' km' + (sel ? ' (' + (100 * tot / total).toFixed(0) + '% do total)' : '') +
+    '<br>Direção média: <b>' + rotuloAz(med) + '</b> (' + med.toFixed(0) + '°) · R = ' + R.toFixed(2) +
+    '<br>Classe dominante: <b>' + ip * 10 + '–' + (ip * 10 + 10) + '°</b> (' + rotuloAz(ip * 10 + 5) + ')';
 }}
-var ultimoClique = '';
 function atualizarRosetas() {{
-  var b1 = binsPor(filtroConjuntos), b2 = binsPor(filtroTela);
-  var comum = document.getElementById('escala-comum').checked, rmax = comum ? Math.max(rmaxDe(b1), rmaxDe(b2)) : 0;
-  desenhar(rosa, b1, function(b) {{ return nSel() === 0 || bins[b]; }}, rmax);
-  desenhar(rosa2, b2, function() {{ return true; }}, rmax);
-  var r1 = resumo(b1, nSel() ? 'Seleção de faixa' : 'Conjuntos marcados', 'Nenhum lineamento na seleção.');
-  document.getElementById('stats').innerHTML = r1.html;
-  var n2 = Object.keys(selTela).length;
-  var r2 = resumo(b2, n2 + ' lineamento(s) selecionado(s)', 'Clique em lineamentos no modelo 3D para somá-los a esta roseta.');
-  document.getElementById('stats2').innerHTML = r2.html + (n2 && ultimoClique ? '<br><span style="opacity:.7">' + ultimoClique + '</span>' : '');
-  return r1.ip;
+  var comum = document.getElementById('escala-comum').checked, rmax = comum ? Math.max(rmaxDe(ROSAS[0]), rmaxDe(ROSAS[1])) : 0;
+  ROSAS.forEach(function(r) {{ desenhar(r, rmax); document.getElementById(r.stats).innerHTML = resumo(r); }});
 }}
 function atualizar3d() {{
-  var sel = nSel() > 0, idx = [], X = [], Y = [], Z = [], cx = [], cy = [], cz = [];
+  var idx = [], X = [], Y = [], Z = [], cx = [], cy = [], cz = [];
+  var alg = ROSAS.some(function(r) {{ return nSel(r) > 0; }});
+  var hl = ROSAS.map(function() {{ return {{x: [], y: [], z: []}}; }});
   Object.keys(DS).forEach(function(k) {{
     var ti = FIG.data.findIndex(function(t) {{ return t.name === DS[k].traco; }});
     if (ti < 0) return;
-    var x = [], y = [], z = [], mapa = [];
-    if (dsOn[k]) DS[k].seg.forEach(function(s, i) {{
-      var dentro = !sel || bins[binDe(s[6])], A = dentro ? [x, y, z] : [cx, cy, cz];
+    var x = [], y = [], z = [];
+    if (dsOn[k]) DS[k].seg.forEach(function(s) {{
+      var b = binDe(s[6]), dest = false;
+      ROSAS.forEach(function(r, q) {{
+        if (nSel(r) > 0 && r.on[k] && r.bins[b]) {{ dest = true; var h = hl[q]; h.x.push(s[0], s[3], null); h.y.push(s[1], s[4], null); h.z.push(s[2] + 8 + q * 4, s[5] + 8 + q * 4, null); }}
+      }});
+      if (dest) return;
+      var A = alg ? [cx, cy, cz] : [x, y, z];
       A[0].push(s[0], s[3], null); A[1].push(s[1], s[4], null); A[2].push(s[2], s[5], null);
-      if (dentro) mapa.push(i);
     }});
-    idxMap[k] = mapa;
     idx.push(ti); X.push(x); Y.push(y); Z.push(z);
   }});
   idx.push(FIG.data.findIndex(function(t) {{ return t.meta === 'ctx'; }})); X.push(cx); Y.push(cy); Z.push(cz);
-  // lineamentos clicados (realce branco)
-  var sx = [], sy = [], sz = [];
-  Object.keys(selTela).forEach(function(f) {{ var ft = FEAT[f]; if (!ft || !dsOn[ft.k]) return; ft.idx.forEach(function(i) {{
-    var s = DS[ft.k].seg[i]; sx.push(s[0], s[3], null); sy.push(s[1], s[4], null); sz.push(s[2] + 8, s[5] + 8, null); }}); }});
-  idx.push(FIG.data.findIndex(function(t) {{ return t.meta === 'sel'; }})); X.push(sx); Y.push(sy); Z.push(sz);
+  ROSAS.forEach(function(r, q) {{ idx.push(FIG.data.findIndex(function(t) {{ return t.meta === r.trace; }})); X.push(hl[q].x); Y.push(hl[q].y); Z.push(hl[q].z); }});
   Plotly.restyle(gd, {{x: X, y: Y, z: Z}}, idx);
 }}
-function atualizarDirecoes() {{ var ip = atualizarRosetas(); atualizar3d(); return ip; }}
+function atualizarDirecoes() {{ atualizarRosetas(); atualizar3d(); }}
 atualizarRosetas();
-rosa.on('plotly_click', function(ev) {{
-  var b = binDe(ev.points[0].theta % 180);
-  if (bins[b]) delete bins[b]; else bins[b] = true;
-  atualizarDirecoes();
-}});
-gd.on('plotly_click', function(ev) {{
-  var pt = ev.points && ev.points[0];
-  if (!pt || !pt.data) return;
-  var k = NOME_DS[pt.data.name];
-  if (!k || !idxMap[k]) return;
-  var si = idxMap[k][Math.floor(pt.pointNumber / 3)];
-  if (si === undefined) return;
-  var s = DS[k].seg[si], f = s[7], ft = FEAT[f];
-  var kmTotal = ft.idx.reduce(function(a, i) {{ return a + DS[k].km[i]; }}, 0);
-  if (selTela[f]) {{ delete selTela[f]; ultimoClique = ''; }}
-  else {{ selTela[f] = true; ultimoClique = DS[k].nome + ' · ' + kmTotal.toFixed(1) + ' km · segmento ' + rotuloAz(s[6]) + ' (' + s[6].toFixed(0) + '°)'; }}
-  atualizarDirecoes();
+ROSAS.forEach(function(r) {{
+  document.getElementById('pref-' + r.id).onclick = function() {{ selecionarPref(r); atualizarDirecoes(); }};
+  document.getElementById('sub-' + r.id).onclick = function() {{ selecionarSub(r); atualizarDirecoes(); }};
+  document.getElementById('lim-' + r.id).onclick = function() {{ r.bins = {{}}; atualizarDirecoes(); }};
 }});
 document.getElementById('escala-comum').onchange = atualizarRosetas;
-document.getElementById('btn-limpar').onclick = function() {{ bins = {{}}; atualizarDirecoes(); }};
-document.getElementById('btn-limpar2').onclick = function() {{ selTela = {{}}; ultimoClique = ''; atualizarDirecoes(); }};
-document.getElementById('btn-pref').onclick = function() {{ var ip = atualizarRosetas(); bins = {{}}; bins[ip] = true; atualizarDirecoes(); }};
-document.getElementById('az-ap').onclick = function() {{
-  var a0 = parseFloat(document.getElementById('az0').value), a1 = parseFloat(document.getElementById('az1').value);
-  bins = {{}};
-  for (var b = 0; b < NB; b++) {{ var c = b * 10 + 5; if (a0 <= a1 ? (c >= a0 && c <= a1) : (c >= a0 || c <= a1)) bins[b] = true; }}
-  if (nSel() === NB) bins = {{}};
-  atualizarDirecoes();
-}};
 document.getElementById('btn-lateral').onclick = function() {{
   var l = document.getElementById('lateral'), vis = l.style.display !== 'none';
   l.style.display = vis ? 'none' : 'block'; this.classList.toggle('ativo', !vis);
-  Plotly.Plots.resize(gd); if (!vis) {{ Plotly.Plots.resize(rosa); Plotly.Plots.resize(rosa2); }}
+  Plotly.Plots.resize(gd); if (!vis) ROSAS.forEach(function(r) {{ Plotly.Plots.resize(r.div); }});
 }};
 </script></body></html>"""
     OUT_HTML.write_text(html, encoding="utf-8")
