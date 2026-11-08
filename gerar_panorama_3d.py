@@ -221,6 +221,8 @@ def main():
     print(f"  {len(pocos)} poços dentro do panorama")
 
     # ---- direcoes dos lineamentos: segmentos (x1,y1,z1,x2,y2,z2,azimute) pra roseta e filtro por direcao (JS) ----
+    from shapely.geometry import Point as _Pt
+    poly_buf = box(*TAIO_AREA).buffer(5000.0)  # area de estudo + 5 km
     cont_fid = [0]
 
     def segmentos(geoms, passo, extra_z):
@@ -236,8 +238,9 @@ def main():
                 zs = z_em([q[0] for q in pts], [q[1] for q in pts], extra_z)
                 for k in range(len(pts) - 1):
                     az = float(np.degrees(np.arctan2(pts[k + 1][0] - pts[k][0], pts[k + 1][1] - pts[k][1])) % 180)
+                    dentro_buf = int(poly_buf.contains(_Pt((pts[k][0] + pts[k + 1][0]) / 2, (pts[k][1] + pts[k + 1][1]) / 2)))
                     out.append([round(pts[k][0]), round(pts[k][1]), round(float(zs[k])), round(pts[k + 1][0]),
-                                round(pts[k + 1][1]), round(float(zs[k + 1])), round(az, 1), cont_fid[0]])
+                                round(pts[k + 1][1]), round(float(zs[k + 1])), round(az, 1), cont_fid[0], dentro_buf])
         return out
 
     ds = {
@@ -259,6 +262,10 @@ def main():
                                name="Fora da seleção", showlegend=False, hoverinfo="skip", meta="ctx"))
     fig.add_trace(go.Scatter3d(x=[], y=[], z=[], mode="lines", line=dict(color="#FFFFFF", width=9),
                                name="Direção selecionada (roseta 1)", showlegend=False, hoverinfo="skip", meta="selA"))
+    bx_, by_ = zip(*poly_buf.exterior.coords)
+    fig.add_trace(go.Scatter3d(x=list(bx_), y=list(by_), z=z_em(list(bx_), list(by_), 150), mode="lines",
+                               line=dict(color="#13BBE6", width=4, dash="dash"), name="Buffer de 5 km (Taió)", meta="corpos",
+                               hoverinfo="name"))
     fig.add_trace(go.Scatter3d(x=[], y=[], z=[], mode="lines", line=dict(color="#FFD54A", width=9),
                                name="Direção selecionada (roseta 2)", showlegend=False, hoverinfo="skip", meta="selB"))
 
@@ -328,6 +335,7 @@ def main():
  <div id="roses">
   <div class="rosa-bloco">
    <h3><i class="chip" style="background:#FFFFFF"></i> Roseta 1</h3>
+   <div class="linha"><label>Área</label><select id="area-A"><option value="pan">Panorama inteiro</option><option value="taio">Taió + buffer de 5 km</option></select></div>
    <div class="ds-lista" id="ds-A"></div>
    <div id="roseta" style="width:100%;height:280px"></div>
    <div class="stats" id="stats"></div>
@@ -335,6 +343,7 @@ def main():
   </div>
   <div class="rosa-bloco">
    <h3><i class="chip" style="background:#FFD54A"></i> Roseta 2</h3>
+   <div class="linha"><label>Área</label><select id="area-B"><option value="pan">Panorama inteiro</option><option value="taio">Taió + buffer de 5 km</option></select></div>
    <div class="ds-lista" id="ds-B"></div>
    <div id="roseta2" style="width:100%;height:280px"></div>
    <div class="stats" id="stats2"></div>
@@ -375,14 +384,16 @@ window.addEventListener('resize', function() {{ gd.style.height = altura() + 'px
 // ---------------- rosetas de direcao dos lineamentos (2 rosetas iguais, cada uma com seus conjuntos e sua selecao) ----------------
 var NB = 18;
 var ROSAS = [
-  {{id: 'A', div: document.getElementById('roseta'), stats: 'stats', lista: 'ds-A', on: {{falha: true, fratura: true, dique: true, loc_pos: true, loc_neg: true}}, bins: {{}}, trace: 'selA'}},
-  {{id: 'B', div: document.getElementById('roseta2'), stats: 'stats2', lista: 'ds-B', on: {{falha: true, fratura: true, dique: true, loc_pos: true, loc_neg: true}}, bins: {{}}, trace: 'selB'}},
+  {{id: 'A', div: document.getElementById('roseta'), stats: 'stats', lista: 'ds-A', on: {{falha: true, fratura: true, dique: true, loc_pos: true, loc_neg: true}}, bins: {{}}, area: 'pan', trace: 'selA'}},
+  {{id: 'B', div: document.getElementById('roseta2'), stats: 'stats2', lista: 'ds-B', on: {{falha: true, fratura: true, dique: true, loc_pos: true, loc_neg: true}}, bins: {{}}, area: 'pan', trace: 'selB'}},
 ];
 function binDe(az) {{ return Math.floor(az / 10) % NB; }}
 function nSel(r) {{ return Object.keys(r.bins).length; }}
 Object.keys(DS).forEach(function(k) {{
   var d = DS[k]; d.km = d.seg.map(function(s) {{ var dx = s[3] - s[0], dy = s[4] - s[1]; return Math.sqrt(dx * dx + dy * dy) / 1000; }});
-  d.bins = new Array(NB).fill(0); d.seg.forEach(function(s, i) {{ d.bins[binDe(s[6])] += d.km[i]; }});
+  d.bins = new Array(NB).fill(0); d.binsT = new Array(NB).fill(0);
+  d.seg.forEach(function(s, i) {{ d.bins[binDe(s[6])] += d.km[i]; if (s[8]) d.binsT[binDe(s[6])] += d.km[i]; }});
+  d.totalT = d.binsT.reduce(function(a, b) {{ return a + b; }}, 0);
   d.total = d.km.reduce(function(a, b) {{ return a + b; }}, 0);
 }});
 function rotuloAz(az) {{ az = ((az % 180) + 180) % 180; return az <= 90 ? 'N' + az.toFixed(0) + '°E' : 'N' + (180 - az).toFixed(0) + '°O'; }}
@@ -397,7 +408,7 @@ ROSAS.forEach(function(r) {{
 }});
 function somaBins(r) {{
   var soma = new Array(NB).fill(0);
-  Object.keys(DS).forEach(function(k) {{ if (r.on[k]) DS[k].bins.forEach(function(km, b) {{ soma[b] += km; }}); }});
+  Object.keys(DS).forEach(function(k) {{ if (r.on[k]) (r.area === 'taio' ? DS[k].binsT : DS[k].bins).forEach(function(km, b) {{ soma[b] += km; }}); }});
   return soma;
 }}
 function distBin(a, b) {{ var d = Math.abs(a - b) % NB; return Math.min(d, NB - d); }}
@@ -422,7 +433,7 @@ function desenhar(r, rmax) {{
   var cor = '{v.MARCA_CINZA_CLARO}', sel = nSel(r) > 0;
   var tr = Object.keys(DS).filter(function(k) {{ return r.on[k]; }}).map(function(k) {{
     var th = [], rr = [], op = [];
-    for (var b = 0; b < NB; b++) {{ [b * 10 + 5, b * 10 + 185].forEach(function(a) {{ th.push(a); rr.push(DS[k].bins[b]); op.push(!sel || r.bins[b] ? 1 : 0.3); }}); }}
+    for (var b = 0; b < NB; b++) {{ [b * 10 + 5, b * 10 + 185].forEach(function(a) {{ th.push(a); rr.push((r.area === 'taio' ? DS[k].binsT : DS[k].bins)[b]); op.push(!sel || r.bins[b] ? 1 : 0.3); }}); }}
     return {{type: 'barpolar', theta: th, r: rr, width: 10, name: DS[k].nome, marker: {{color: DS[k].cor, opacity: op, line: {{color: '#071729', width: 0.5}}}},
             hovertemplate: '%{{theta}}°: %{{r:.1f}} km<extra>' + DS[k].nome + '</extra>'}};
   }});
@@ -440,10 +451,13 @@ function resumo(r) {{
   var sx = 0, sy = 0, tot = 0, sel = nSel(r) > 0, soma = somaBins(r);
   soma.forEach(function(km, b) {{ if (sel && !r.bins[b]) return; var a = (b * 10 + 5) * Math.PI / 90; sx += km * Math.cos(a); sy += km * Math.sin(a); tot += km; }});
   var ip = soma.indexOf(Math.max.apply(null, soma));
-  if (!tot) return 'Nenhum conjunto marcado.';
+  if (!tot) return 'Nenhum lineamento nesta seleção/área.';
   var med = ((Math.atan2(sy, sx) * 90 / Math.PI) + 180) % 180, R = Math.sqrt(sx * sx + sy * sy) / tot;
   var total = soma.reduce(function(a, b) {{ return a + b; }}, 0);
-  return '<b>' + (sel ? 'Seleção' : 'Conjuntos marcados') + '</b>: ' + tot.toFixed(0) + ' km' + (sel ? ' (' + (100 * tot / total).toFixed(0) + '% do total)' : '') +
+  var feats = {{}}, nf = 0;
+  Object.keys(DS).forEach(function(k) {{ if (!r.on[k]) return; DS[k].seg.forEach(function(s) {{
+    if (r.area === 'taio' && !s[8]) return; if (sel && !r.bins[binDe(s[6])]) return; if (!feats[s[7]]) {{ feats[s[7]] = 1; nf++; }} }}); }});
+  return '<b>' + (r.area === 'taio' ? 'Taió + 5 km · ' : 'Panorama · ') + (sel ? 'Seleção' : 'Conjuntos marcados') + '</b>: ' + tot.toFixed(0) + ' km · ' + nf + ' lineamentos' + (sel ? ' (' + (100 * tot / total).toFixed(0) + '% do total)' : '') +
     '<br>Direção média: <b>' + rotuloAz(med) + '</b> (' + med.toFixed(0) + '°) · R = ' + R.toFixed(2) +
     '<br>Classe dominante: <b>' + ip * 10 + '–' + (ip * 10 + 10) + '°</b> (' + rotuloAz(ip * 10 + 5) + ')';
 }}
@@ -453,7 +467,7 @@ function atualizarRosetas() {{
 }}
 function atualizar3d() {{
   var idx = [], X = [], Y = [], Z = [], cx = [], cy = [], cz = [];
-  var alg = ROSAS.some(function(r) {{ return nSel(r) > 0; }});
+  var alg = ROSAS.some(function(r) {{ return nSel(r) > 0 || r.area === 'taio'; }});
   var hl = ROSAS.map(function() {{ return {{x: [], y: [], z: []}}; }});
   Object.keys(DS).forEach(function(k) {{
     var ti = FIG.data.findIndex(function(t) {{ return t.name === DS[k].traco; }});
@@ -462,7 +476,7 @@ function atualizar3d() {{
     if (dsOn[k]) DS[k].seg.forEach(function(s) {{
       var b = binDe(s[6]), dest = false;
       ROSAS.forEach(function(r, q) {{
-        if (nSel(r) > 0 && r.on[k] && r.bins[b]) {{ dest = true; var h = hl[q]; h.x.push(s[0], s[3], null); h.y.push(s[1], s[4], null); h.z.push(s[2] + 8 + q * 4, s[5] + 8 + q * 4, null); }}
+        if (r.on[k] && (r.area === 'pan' || s[8]) && (nSel(r) > 0 ? r.bins[b] : r.area === 'taio')) {{ dest = true; var h = hl[q]; h.x.push(s[0], s[3], null); h.y.push(s[1], s[4], null); h.z.push(s[2] + 8 + q * 4, s[5] + 8 + q * 4, null); }}
       }});
       if (dest) return;
       var A = alg ? [cx, cy, cz] : [x, y, z];
@@ -477,6 +491,7 @@ function atualizar3d() {{
 function atualizarDirecoes() {{ atualizarRosetas(); atualizar3d(); }}
 atualizarRosetas();
 ROSAS.forEach(function(r) {{
+  document.getElementById('area-' + r.id).onchange = function() {{ r.area = this.value; r.bins = {{}}; atualizarDirecoes(); }};
   document.getElementById('pref-' + r.id).onclick = function() {{ selecionarPref(r); atualizarDirecoes(); }};
   document.getElementById('sub-' + r.id).onclick = function() {{ selecionarSub(r); atualizarDirecoes(); }};
   document.getElementById('lim-' + r.id).onclick = function() {{ r.bins = {{}}; atualizarDirecoes(); }};
