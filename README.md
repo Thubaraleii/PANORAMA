@@ -28,6 +28,12 @@ continental), para análise regional de lineamentos, poços e geologia, como bas
 - Lineamentos locais (positivos e negativos) do mapeamento do autor; falhas, fraturas e diques regionais do SIG SC (CPRM).
 - Roseta: azimute de cada segmento (~0,7–1 km) ponderado pelo comprimento; direção média pelo método do ângulo duplicado.
 
+## Idioma e navegação
+
+- **Idioma:** o botão **EN / PT**, ao lado do logotipo, alterna a interface entre português e inglês em tempo real (menus, legendas, dicas, popups, rótulos e textos 3D). A escolha é lembrada no navegador e acompanha os links entre as páginas (`?lang=en`).
+- **Hub:** o botão **← Hub** volta à página inicial do projeto, mantendo o idioma.
+- **Tradução:** feita no navegador por dicionário (`tps_i18n_dict.py`, embutido na página por `tps_i18n.py` ao gerar o HTML). Dados de origem em português (por exemplo, descrições de campo e nomes próprios de unidades) permanecem no idioma original.
+
 ## Uso
 
 Abra `panorama_3d_taio.html` no navegador ou acesse a versão publicada. Clique em **Rosetas** para abrir o painel de direções.
