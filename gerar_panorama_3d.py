@@ -44,6 +44,37 @@ COR_LINEAMENTO = {"Positivo": "#2E7D5B", "Negativo": "#E8A33D"}
 URL_TERRARIUM = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
 
 
+PLANILHA_POCOS = BANCO / "dados_base" / "pocos_ANP_isolados.xlsx"
+
+
+def camadas_planilha_pocos(f_relevo, nomes_permitidos):
+    """Soleiras (intervalos topo-base) e topos de unidade dos pocos da planilha PMP/ANP, referidos ao relevo do DEM.
+    f_relevo(xs, ys) -> z do terreno; so os pocos em nomes_permitidos entram. Retorna None se a planilha nao existe."""
+    import pandas as _pd
+    if not PLANILHA_POCOS.exists():
+        return None
+    xl = _pd.read_excel(PLANILHA_POCOS, sheet_name=None)
+    res = xl["Resumo"].set_index("Poco")[["E_utm22s", "N_utm22s"]]
+    res = res[res.index.isin(list(nomes_permitidos))]
+    if not len(res):
+        return None
+    zt = dict(zip(res.index, np.asarray(f_relevo(res["E_utm22s"].values, res["N_utm22s"].values), float)))
+    ex, ey = res["E_utm22s"].to_dict(), res["N_utm22s"].to_dict()
+    sx, sy, sz = [], [], []
+    sol = xl["Corpos_intrusivos"]
+    for r in sol[sol["Poco"].isin(res.index)].itertuples():
+        x, y, z0 = ex[r.Poco], ey[r.Poco], zt[r.Poco]
+        sx += [x, x, None]; sy += [y, y, None]; sz += [z0 - r.prof_topo_m, z0 - r.prof_base_m, None]
+    tx, ty, tz, tt = [], [], [], []
+    top = xl["Topos_unidades"]
+    for r in top[top["Poco"].isin(res.index) & top["prof_topo_m"].notna()].itertuples():
+        x, y, z0 = ex[r.Poco], ey[r.Poco], zt[r.Poco]
+        zc = z0 - r.prof_topo_m
+        tx.append(x); ty.append(y); tz.append(zc)
+        tt.append(f"<b>{r.Poco}</b><br>{r.nome_unidade}<br>topo a {r.prof_topo_m:.0f} m (cota {zc:.0f} m)")
+    return sx, sy, sz, tx, ty, tz, tt
+
+
 def mosaico(nome, fonte, zoom):
     """Baixa (ou le do cache) o mosaico de tiles cobrindo o panorama. Devolve (array RGB, extent EPSG:3857)."""
     import contextily as ctx
@@ -219,6 +250,14 @@ def main():
         fig.add_trace(go.Scatter3d(x=hx, y=hy, z=hz, mode="lines", line=dict(color="#13BBE6", width=4), showlegend=False,
                                    hoverinfo="skip", meta="pocos"))
     print(f"  {len(pocos)} poços dentro do panorama")
+    # ---- soleiras (intervalos) e topos de unidade dos pocos da planilha PMP/ANP ----
+    plan = camadas_planilha_pocos(lambda xs, ys: z_em(xs, ys, 0), set(pocos['nome']))
+    if plan is not None:
+        sx, sy, sz, tx, ty, tz, tt = plan
+        fig.add_trace(go.Scatter3d(x=sx, y=sy, z=sz, mode="lines", line=dict(color="#FF493D", width=9), name="Soleiras (poços PMP/ANP)",
+                                   meta="pocos", hoverinfo="skip"))
+        fig.add_trace(go.Scatter3d(x=tx, y=ty, z=tz, mode="markers", marker=dict(size=4, symbol="diamond", color="#F1F5F9"), text=tt,
+                                   hoverinfo="text", name="Topos de unidade (poços PMP/ANP)", meta="pocos"))
 
     # ---- direcoes dos lineamentos: segmentos (x1,y1,z1,x2,y2,z2,azimute) pra roseta e filtro por direcao (JS) ----
     from shapely.geometry import Point as _Pt
